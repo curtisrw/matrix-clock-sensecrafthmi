@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Curtis Matrix Clock</title>
+<title>Curtis Matrix Clock (Embedded)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <style>
   html, body {
@@ -20,7 +20,7 @@
 <canvas id="matrix"></canvas>
 
 <script>
-// =============== TIME (5-MIN ROUND, 12-HOUR + AM/PM) ==================
+// ========== TIME (5-MIN ROUND, 12-HOUR + AM/PM) ==========
 function pad(n) { return n < 10 ? "0" + n : "" + n; }
 
 function getRoundedTimestamp() {
@@ -49,7 +49,7 @@ function getRoundedTimestamp() {
 
 const { timeStr, dateStr } = getRoundedTimestamp();
 
-// ======================= MATRIX SETUP =========================
+// =================== MATRIX SETUP ===================
 const canvas = document.getElementById("matrix");
 const ctx = canvas.getContext("2d");
 
@@ -57,18 +57,18 @@ let fontSize = 12;
 let cols = 0;
 let maxRows = 0;
 let drops = [];
-let embed = [];
+let embeds = [];
 
 const chars =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{};:<>,.?/";
 
-// recompute layout for current size (works for 800x480 + previews)
+// compute layout for current size (works for 800x480 + previews)
 function initCanvas() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 
-  // smaller font -> more columns (matrix-style)
-  fontSize = Math.floor(canvas.width / 64); // ~64 cols at 800px
+  // smaller font -> more columns (dense rain)
+  fontSize = Math.floor(canvas.width / 64); // ≈64 cols at 800px
   if (fontSize < 10) fontSize = 10;
   if (fontSize > 14) fontSize = 14;
 
@@ -77,29 +77,30 @@ function initCanvas() {
   cols = Math.floor(canvas.width / fontSize);
   maxRows = Math.floor(canvas.height / fontSize);
 
-  // start drops above screen so they "fall in" and build trails
+  // drops start above screen to build vertical trails
   drops = Array(cols)
     .fill(0)
     .map(() => Math.floor(Math.random() * -maxRows));
 
-  computeEmbedPositions();
+  computeEmbeds();
 }
 
-function computeEmbedPositions() {
+// build list of embedded characters (time + date)
+// each with a column & row position
+function computeEmbeds() {
   const centerCol = Math.floor(cols / 2);
   const centerRow = Math.floor(maxRows / 2);
 
-  // time slightly above true center, date slightly below
   const timeRow = centerRow - 1;
   const dateRow = centerRow + 1;
 
   const timeStart = centerCol - Math.floor(timeStr.length / 2);
   const dateStart = centerCol - Math.floor(dateStr.length / 2);
 
-  embed = [];
+  embeds = [];
 
   for (let i = 0; i < timeStr.length; i++) {
-    embed.push({
+    embeds.push({
       col: timeStart + i,
       row: timeRow,
       ch: timeStr.charAt(i)
@@ -107,7 +108,7 @@ function computeEmbedPositions() {
   }
 
   for (let i = 0; i < dateStr.length; i++) {
-    embed.push({
+    embeds.push({
       col: dateStart + i,
       row: dateRow,
       ch: dateStr.charAt(i)
@@ -118,48 +119,61 @@ function computeEmbedPositions() {
 initCanvas();
 window.addEventListener("resize", initCanvas);
 
-// ======================= DRAW FRAME ===========================
+// quick lookup: for any column, do we have an embedded char there?
+function embedForColumn(col) {
+  // there may be multiple (time + date) in same col, but that’s fine
+  return embeds.filter(e => e.col === col);
+}
+
+// =================== DRAW FRAME ===================
 function drawFrame() {
-  // very light fade -> strong ghost trails like your target photo
+  // very light fade -> strong ghost trails (TRMNL look)
   ctx.fillStyle = "rgba(0, 0, 0, 0.06)";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // normal rain
-  ctx.fillStyle = "rgba(255,255,255,0.7)";
   ctx.font = fontSize + "px monospace";
 
-  for (let i = 0; i < cols; i++) {
-    const char = chars.charAt(Math.floor(Math.random() * chars.length));
-    const x = i * fontSize;
-    const y = drops[i] * fontSize;
+  // first, advance drops & draw normal rain
+  ctx.fillStyle = "rgba(255,255,255,0.70)";
 
+  for (let col = 0; col < cols; col++) {
+    const x = col * fontSize;
+    const y = drops[col] * fontSize;
+
+    const char = chars.charAt(Math.floor(Math.random() * chars.length));
     ctx.fillText(char, x, y);
 
-    drops[i]++;
+    drops[col]++;
 
-    if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) {
-      drops[i] = Math.floor(Math.random() * -maxRows);
+    if (drops[col] * fontSize > canvas.height && Math.random() > 0.975) {
+      drops[col] = Math.floor(Math.random() * -maxRows);
     }
   }
 
-  // embedded time/date – just slightly brighter but same style
-  ctx.fillStyle = "rgba(255,255,255,0.96)";
-  embed.forEach(e => {
-    ctx.fillText(e.ch, e.col * fontSize, e.row * fontSize);
+  // now "embed" the time/date inside those same columns:
+  // force the drop position for those columns to the desired row,
+  // and draw a bold, bright glyph at that exact grid cell.
+  ctx.font = "bold " + fontSize + "px monospace";
+  ctx.fillStyle = "rgba(255,255,255,1)";
+
+  embeds.forEach(e => {
+    // ensure the rain in this column is at the embed row
+    drops[e.col] = e.row;
+
+    const x = e.col * fontSize;
+    const y = e.row * fontSize;
+    ctx.fillText(e.ch, x, y);
   });
 }
 
-// warm-up: build trails BEFORE previews grab a snapshot
+// warm up a bunch of frames so the first snapshot is nicely dense
 function warmup(frames) {
   for (let i = 0; i < frames; i++) {
     drawFrame();
   }
 }
 
-// run a warmup to get that dense, ghosted background immediately
-warmup(Math.floor(maxRows * 1.3));
-
-// then run at a steady pace; e-ink will just capture snapshots
+warmup(Math.floor(maxRows * 1.5));
 setInterval(drawFrame, 180);
 </script>
 </body>
