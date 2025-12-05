@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Matrix Clock (E-Ink Style)</title>
+<title>Matrix Clock (800x400 Optimized)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <style>
   html, body {
@@ -11,7 +11,6 @@
     height: 100%;
     background: #000;
     overflow: hidden;
-    color: #fff;
     font-family: monospace;
   }
   canvas { display: block; }
@@ -21,19 +20,15 @@
 <canvas id="matrix"></canvas>
 
 <script>
-// ---------------- TIME + DATE (5-MIN ROUND) ----------------
-
+// ================== TIME (5-MIN ROUND, 12-HOUR + AM/PM) ==================
 function pad(n) { return n < 10 ? "0" + n : "" + n; }
 
 function getRoundedTimestamp() {
     const now = new Date();
 
-    // Round DOWN to nearest 5 minutes
     const rounded = new Date(now);
-    const flooredMin = Math.floor(now.getMinutes() / 5) * 5;
-    rounded.setMinutes(flooredMin, 0, 0);
+    rounded.setMinutes(Math.floor(now.getMinutes() / 5) * 5, 0, 0);
 
-    // 12-hour format + AM/PM
     let h = rounded.getHours();
     const ampm = h >= 12 ? "PM" : "AM";
     h = h % 12;
@@ -41,9 +36,9 @@ function getRoundedTimestamp() {
 
     const hh = pad(h);
     const mm = pad(rounded.getMinutes());
+
     const timeStr = `${hh}:${mm} ${ampm}`;
 
-    // Date (short)
     const dateStr = rounded.toLocaleDateString(undefined, {
         weekday: 'short',
         month: 'short',
@@ -55,73 +50,81 @@ function getRoundedTimestamp() {
 
 const { timeStr, dateStr } = getRoundedTimestamp();
 
-// ---------------- MATRIX SETUP ----------------
 
+// ================== MATRIX SETUP ==================
 const canvas = document.getElementById("matrix");
 const ctx = canvas.getContext("2d");
 
-let fontSize = 18;
+// PERFECT SIZE FOR 800×400
+let fontSize = 14;  
 let cols;
 let drops = [];
+let embed = [];
 
+const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{};:<>,.?/";
+
+// ---------------- Recompute Grid ----------------
 function initCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
-    fontSize = 18;
-    cols = Math.floor(canvas.width / fontSize);
-
-    const maxRows = Math.floor(canvas.height / fontSize);
-
-    // Seed drops so FIRST frame already has characters across the screen
-    drops = [];
-    for (let i = 0; i < cols; i++) {
-        // random starting row between 0 and maxRows
-        drops[i] = Math.floor(Math.random() * maxRows);
-    }
+    // Font scaled for 800px width
+    fontSize = Math.floor(canvas.width / 56);  
+    if (fontSize < 12) fontSize = 12;
+    if (fontSize > 16) fontSize = 16;
 
     ctx.font = fontSize + "px monospace";
+
+    cols = Math.floor(canvas.width / fontSize);
+    const maxRows = Math.floor(canvas.height / fontSize);
+
+    // Seed drops at random visible rows
+    drops = Array(cols).fill(0).map(() => Math.floor(Math.random() * maxRows));
+
+    computeEmbedPositions(maxRows);
 }
+
+function computeEmbedPositions(maxRows) {
+    // Place time & date centered vertically
+    const centerRow = Math.floor(maxRows / 2);
+
+    // Time sits in the middle, date slightly below
+    const timeRow = centerRow;
+    const dateRow = centerRow + 2;
+
+    const centerCol = Math.floor(cols / 2);
+    const timeStart = centerCol - Math.floor(timeStr.length / 2);
+    const dateStart = centerCol - Math.floor(dateStr.length / 2);
+
+    embed = [];
+
+    for (let i = 0; i < timeStr.length; i++) {
+        embed.push({
+            col: timeStart + i,
+            row: timeRow,
+            ch: timeStr.charAt(i)
+        });
+    }
+
+    for (let i = 0; i < dateStr.length; i++) {
+        embed.push({
+            col: dateStart + i,
+            row: dateRow,
+            ch: dateStr.charAt(i)
+        });
+    }
+}
+
 initCanvas();
 window.addEventListener("resize", initCanvas);
 
-const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{};:<>,.?/";
 
-// ---------------- EMBED TIME + DATE ----------------
-
-function embedStringInColumns(str, startCol, row) {
-    return str.split("").map((ch, i) => ({
-        col: startCol + i,
-        row,
-        ch
-    }));
-}
-
-const centerCol = () => Math.floor(cols / 2);
-let embed = [];
-
-function recomputeEmbedPositions() {
-    const c = centerCol();
-    const timeColStart = c - Math.floor(timeStr.length / 2);
-    const dateColStart = c - Math.floor(dateStr.length / 2);
-
-    embed = [
-        ...embedStringInColumns(timeStr, timeColStart, 14),
-        ...embedStringInColumns(dateStr, dateColStart, 16)
-    ];
-}
-recomputeEmbedPositions();
-
-// ---------------- DRAW FRAME ----------------
-
+// ================== DRAW FRAME ==================
 function draw() {
-    // light fade for trailing effect
     ctx.fillStyle = "rgba(0, 0, 0, 0.18)";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // background rain (slightly dim)
     ctx.fillStyle = "rgba(255,255,255,0.75)";
-    ctx.font = fontSize + "px monospace";
 
     for (let i = 0; i < cols; i++) {
         const text = chars.charAt(Math.floor(Math.random() * chars.length));
@@ -133,25 +136,25 @@ function draw() {
         drops[i]++;
 
         if (y > canvas.height && Math.random() > 0.96) {
-            drops[i] = Math.random() * -20;
+            drops[i] = Math.floor(Math.random() * -20);
         }
     }
 
-    // embedded TIME + DATE (slightly brighter)
-    ctx.fillStyle = "rgba(255,255,255,0.95)";
+    // Embedded time/date (slightly brighter)
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
     embed.forEach(e => {
         ctx.fillText(e.ch, e.col * fontSize, e.row * fontSize);
     });
 }
 
-// ---- IMPORTANT: draw immediately so previews aren't black ----
-draw();                      // first frame right away
-setTimeout(draw, 60);        // a couple more quick frames
+// Immediate frames so SenseCraft preview doesn't show black
+draw();
+setTimeout(draw, 50);
 setTimeout(draw, 120);
 
-// then continue at a steady pace for normal operation
-setInterval(draw, 250);
-</script>
+// Animation (your e-ink will only capture snapshots)
+setInterval(draw, 200);
 
+</script>
 </body>
 </html>
