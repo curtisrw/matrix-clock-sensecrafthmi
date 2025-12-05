@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Curtis Matrix Clock (Ordered Floating)</title>
+<title>Curtis Matrix Clock (CST Offset, Ordered Floating)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <style>
   html, body {
@@ -20,14 +20,19 @@
 <canvas id="matrix"></canvas>
 
 <script>
-// ================= TIME (5-MIN ROUND, 12-HOUR) ==================
+// ================= TIME (5-MIN ROUND, 12-HOUR, CST OFFSET) ==================
 function pad(n) { return n < 10 ? "0" + n : "" + n; }
 
 function getRoundedTimestamp() {
   const now = new Date();
 
-  const rounded = new Date(now);
-  rounded.setMinutes(Math.floor(now.getMinutes() / 5) * 5, 0, 0);
+  // SenseCraft cloud appears ~14h ahead of CST, so subtract 14 hours.
+  // If this ever changes, just tweak OFFSET_HOURS.
+  const OFFSET_HOURS = -14;
+  const adjusted = new Date(now.getTime() + OFFSET_HOURS * 60 * 60 * 1000);
+
+  const rounded = new Date(adjusted);
+  rounded.setMinutes(Math.floor(adjusted.getMinutes() / 5) * 5, 0, 0);
 
   let h = rounded.getHours();
   const ampm = h >= 12 ? "PM" : "AM";
@@ -55,7 +60,7 @@ const canvas = document.getElementById("matrix");
 const ctx = canvas.getContext("2d");
 
 let rainFont = 12;       // small font for rain
-let embedFont = 22;      // larger font only for time/date chars
+let embedFont = 22;      // larger font for time/date chars
 let cols = 0;
 let maxRows = 0;
 let drops = [];
@@ -92,39 +97,33 @@ function initCanvas() {
 function computeEmbeds() {
   embeds = [];
 
-  // central band where characters will float
-  const minRow = Math.floor(maxRows * 0.28);
-  const maxRow = Math.floor(maxRows * 0.72);
+  // central vertical band; we'll jitter characters inside this range
+  const minRow = Math.floor(maxRows * 0.22);
+  const maxRow = Math.floor(maxRows * 0.78);
 
-  // we keep order left-to-right by using a running column
   const totalChars = combinedStr.length;
   const centerCol = Math.floor(cols / 2);
 
-  // start column so the whole string is roughly centered,
-  // but we will add random gaps between characters
+  // base column so the full string is roughly centered
   let col = centerCol - Math.floor(totalChars / 2);
-
   if (col < 1) col = 1;
   if (col > cols - totalChars - 1) col = cols - totalChars - 1;
 
   for (let i = 0; i < combinedStr.length; i++) {
     const ch = combinedStr.charAt(i);
 
-    // advance column by 1–3 cells to get uneven spacing but monotonic
+    // uneven spacing but monotonic left-to-right
     col += 1 + Math.floor(Math.random() * 2); // step of 1 or 2
-
-    // clamp so we don't run off the right edge
     if (col >= cols - 2) col = cols - 3;
 
-    // choose a row around the middle with a little vertical jitter
-    const baseRow = Math.floor((minRow + maxRow) / 2);
-    const jitter = Math.floor(Math.random() * 5) - 2; // -2..+2
-    let row = baseRow + jitter;
+    // base row near middle of band, with larger vertical jitter
+    const midBand = Math.floor((minRow + maxRow) / 2);
+    const jitter = Math.floor(Math.random() * 13) - 6; // -6..+6 rows
+    let row = midBand + jitter;
     if (row < minRow) row = minRow;
     if (row > maxRow) row = maxRow;
 
-    // for spaces, we skip drawing but keep advancing cols so spacing remains
-    if (ch === " ") continue;
+    if (ch === " ") continue; // skip spaces but keep spacing effect
 
     embeds.push({ col, row, ch });
   }
@@ -162,7 +161,7 @@ function drawFrame() {
   ctx.fillStyle = "rgba(255,255,255,1)";
 
   embeds.forEach(e => {
-    const x = e.col * rainFont;  // still snapping to rain grid horizontally
+    const x = e.col * rainFont;  // grid horizontal alignment
     const y = e.row * rainFont;
     ctx.fillText(e.ch, x, y);
   });
