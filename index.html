@@ -1,141 +1,136 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Matrix Time</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      background: #000000;
-      color: #00ff00;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
-                   "Segoe UI", sans-serif;
-      overflow: hidden;
-    }
-
-    canvas {
-      display: block;
-    }
-  </style>
+<meta charset="UTF-8" />
+<title>Matrix Clock (E-Ink Style)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #000;
+    overflow: hidden;
+    color: #fff;
+    font-family: monospace;
+  }
+  canvas { display: block; }
+</style>
 </head>
 <body>
-  <canvas id="matrix"></canvas>
+<canvas id="matrix"></canvas>
 
-  <script>
-    // ------- TIME (12-HOUR FORMAT WITH AM/PM, ROUNDED TO 5 MINUTES) -------
-    function pad(n) {
-      return n < 10 ? "0" + n : "" + n;
-    }
+<script>
+// ---------------- TIME + DATE (5-MIN ROUND) ----------------
 
-    function getRoundedTimeString() {
-      const now = new Date();
+function pad(n) { return n < 10 ? "0" + n : "" + n; }
 
-      // Round DOWN to nearest 5 minutes
-      const rounded = new Date(now);
-      const flooredMinutes = Math.floor(rounded.getMinutes() / 5) * 5;
-      rounded.setMinutes(flooredMinutes, 0, 0);
+function getRoundedTimestamp() {
+    const now = new Date();
 
-      // Convert to 12-hour time
-      let hours = rounded.getHours();
-      const minutes = pad(rounded.getMinutes());
-      const ampm = hours >= 12 ? "PM" : "AM";
+    // Round DOWN to nearest 5 minutes
+    const rounded = new Date(now);
+    const flooredMin = Math.floor(now.getMinutes() / 5) * 5;
+    rounded.setMinutes(flooredMin, 0, 0);
 
-      hours = hours % 12;
-      if (hours === 0) hours = 12; // midnight/noon edge case
-      const hoursStr = pad(hours);
+    // 12-hour format + AM/PM
+    let h = rounded.getHours();
+    const ampm = h >= 12 ? "PM" : "AM";
+    h = h % 12;
+    if (h === 0) h = 12;
 
-      // Example output: "10:15 AM"
-      return `${hoursStr}:${minutes} ${ampm}`;
-    }
+    const hh = pad(h);
+    const mm = pad(rounded.getMinutes());
+    const timeStr = `${hh}:${mm} ${ampm}`;
 
-    const timeString = getRoundedTimeString();
+    // Date (short like TRMNL)
+    const dateStr = rounded.toLocaleDateString(undefined, {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric'
+    });
 
+    return { timeStr, dateStr };
+}
 
-    // ------------------------ MATRIX BACKGROUND ------------------------
-    const canvas = document.getElementById("matrix");
-    const ctx = canvas.getContext("2d");
+const { timeStr, dateStr } = getRoundedTimestamp();
 
-    const letters = "01ABCDEFGHIJKLMNOPQRSTUVWXYZ#$%&*+-";
-    let drops = [];
-    let fontSize = 16;
-    let columns = 0;
+// ---------------- MATRIX SETUP ----------------
 
-    // Time embedding coordinates
-    let timeCols = [];
-    let timeRow = 0;
+const canvas = document.getElementById("matrix");
+const ctx = canvas.getContext("2d");
 
-    function initCanvas() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+let fontSize = 18;
+let cols;
+let drops = [];
 
-      fontSize = 16;
-      columns = Math.floor(canvas.width / fontSize);
+function initCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
 
-      drops = [];
-      for (let i = 0; i < columns; i++) {
-        drops[i] = Math.floor(Math.random() * -20);
-      }
+    cols = Math.floor(canvas.width / fontSize);
+    drops = Array(cols).fill(0).map(() => Math.random() * -20);
+}
+initCanvas();
+window.addEventListener("resize", initCanvas);
 
-      // Place the time centered horizontally inside the rain
-      const len = timeString.length; 
-      const baseCol = Math.floor(columns / 2) - Math.floor(len / 2);
+const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{};:<>,.?/";
+ctx.font = fontSize + "px monospace";
 
-      timeCols = [];
-      for (let i = 0; i < len; i++) {
-        timeCols.push(baseCol + i);
-      }
+// ---------------- EMBED TIME + DATE ----------------
+// We embed characters by selecting rows/columns and replacing
+// whatever character appears in that stream.
 
-      // Vertically center the time
-      timeRow = Math.floor(canvas.height / (2 * fontSize));
-    }
+function embedStringInColumns(str, startCol, row) {
+    return str.split("").map((ch, i) => ({
+        col: startCol + i,
+        row,
+        ch
+    }));
+}
 
-    function drawMatrixFrame() {
-      // trail effect
-      ctx.fillStyle = "rgba(0,0,0,0.22)";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+// Time & date placement
+const centerCol = Math.floor(cols / 2);
+const timeColStart = centerCol - Math.floor(timeStr.length / 2);
+const dateColStart = centerCol - Math.floor(dateStr.length / 2);
 
-      ctx.font = fontSize + "px monospace";
+const embed = [
+    ...embedStringInColumns(timeStr, timeColStart, 14),
+    ...embedStringInColumns(dateStr, dateColStart, 16)
+];
 
-      // Background rain
-      ctx.fillStyle = "#00aa00"; // slightly dimmer green for background rain
-      for (let i = 0; i < drops.length; i++) {
-        const text = letters.charAt(Math.floor(Math.random() * letters.length));
+// ---------------- DRAW FRAME ----------------
+
+function draw() {
+    ctx.fillStyle = "rgba(0, 0, 0, 0.18)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = "rgba(255,255,255,0.75)"; // normal rain
+
+    for (let i = 0; i < cols; i++) {
+        const text = chars.charAt(Math.floor(Math.random() * chars.length));
         const x = i * fontSize;
         const y = drops[i] * fontSize;
 
         ctx.fillText(text, x, y);
 
-        if (y > canvas.height && Math.random() > 0.95) {
-          drops[i] = Math.floor(Math.random() * -10);
-        } else {
-          drops[i]++;
+        drops[i]++;
+
+        if (y > canvas.height && Math.random() > 0.96) {
+            drops[i] = Math.random() * -20;
         }
-      }
-
-      // TIME CHARACTERS — brighter and bolder 💡
-      ctx.fillStyle = "#00ff55"; // stronger green (more visible on e-ink)
-      ctx.font = "bold " + fontSize + "px monospace";
-
-      for (let i = 0; i < timeString.length; i++) {
-        const col = timeCols[i];
-        const ch = timeString.charAt(i);
-
-        const x = col * fontSize;
-        const y = timeRow * fontSize;
-
-        ctx.fillText(ch, x, y);
-      }
     }
 
-    // Initialize and animate (panel will only show snapshots)
-    initCanvas();
-    window.addEventListener("resize", initCanvas);
+    // --- Draw embedded TIME + DATE ---
+    ctx.fillStyle = "rgba(255,255,255,0.95)"; // slightly brighter
+    embed.forEach(e => {
+        ctx.fillText(e.ch, e.col * fontSize, e.row * fontSize);
+    });
+}
 
-    // Continuous animation (e-ink will capture only periodic snapshots)
-    setInterval(drawMatrixFrame, 200);
-  </script>
+// Animate internally; e-ink displays only snapshots
+setInterval(draw, 250);
+</script>
+
 </body>
 </html>
